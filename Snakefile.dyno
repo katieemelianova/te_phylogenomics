@@ -1,0 +1,59 @@
+import itertools
+import networkx 
+from networkx.algorithms.components.connected import connected_components
+
+
+
+rule calc_divergence:
+    input: "/scratch/botany/katie/assembled_genomes/assemblies/{species}/working/{species}.fasta.align"
+    output: "{species}.fasta.divsum"
+    shell:
+        """
+        /apps/repeatmasker/4.1.5-3.11.4-5.36.1/util/calcDivergenceFromAlign.pl -s {output} {input}
+        """
+
+
+rule get_recent_transposed:
+    input: "{species}.fasta.divsum"
+    output: "{species}_{repeat}.txt"
+    shell:
+        """
+        cat {input} | awk '$5 < 5' | grep "{wildcards.repeat}" | cut -f 2 > {output}
+        """
+
+
+rule recent_transposed_gff:
+    input: 
+        gff="/scratch/botany/katie/assembled_genomes/assemblies/{species}/working/{species}.fasta.out.gff",
+        te="{species}_{repeat}.txt"
+    output: dynamic("{species}_{repeat}_TE{family}.bed") 
+    shell:
+        """
+        while read i; 
+        do family=`echo $i | cut -d"_" -f 1,2`; 
+        outfile=`echo {wildcards.species}_{wildcards.repeat}_$family.bed`; 
+        ( grep  $family {input.gff} || true ) >> $outfile;
+        done < {input.te}
+        """
+
+rule merge:
+    input: "{species}_{repeat}_TE{family}.bed"
+    output: "{species}_{repeat}_TE{family}.bed.merged"
+    shell:
+        """
+        bedtools sort -i {input} | bedtools merge -d 5000 > {output}
+        """
+
+rule subseq:
+    input: 
+        merged_bed="{species}_{repeat}_TE{family}.bed.merged",
+        fasta_file="/scratch/botany/katie/assembled_genomes/assemblies/{species}/working/{species}.fasta"
+    output: "{species}_{repeat}_TE{family}.bed.merged.fasta"
+    shell:
+        """
+        seqkit subseq --bed {input.merged_bed} {input.fasta_file} --up-stream 2000 --down-stream 2000 > {output}
+        """
+
+
+rule all:
+    input: dynamic("sandwicensis_Copia_TE{family}.bed.merged.fasta")
